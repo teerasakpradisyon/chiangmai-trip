@@ -62,7 +62,7 @@ header p{margin:3px 0 0;font-size:12px;opacity:.75}
   <h1>🏔️ เชียงใหม่ · 9–13 ตุลาคม 2026</h1>
   <p>สไลด์ซ้าย–ขวาเลือกวัน · เลื่อนขึ้น–ลงดูแผนในวันนั้น</p>
   <button class="ar" id="share" style="width:auto;padding:6px 14px;margin-top:8px;font-size:12px">🔗 คัดลอกลิงก์ให้เพื่อน</button>
-  <div class="note" id="note">เชื่อมต่อฐานข้อมูลไม่ได้ ลองรีเฟรชหน้าเว็บ</div>
+  <div class="note" id="note">เชื่อมต่อฐานข้อมูลไม่ได้ ตรวจว่า Realtime Database เปิดเป็น test mode แล้ว แล้วรีเฟรช</div>
 </header>
 <div class="deck" id="deck"></div>
 <div class="nav"><button class="ar" id="pv">◀</button><div class="dots" id="dots"></div><button class="ar" id="nx">▶</button></div>
@@ -188,56 +188,56 @@ const SEED=[
 [12,"09:00","วัดสวนดอก","เจดีย์ขาว ลานถ่ายรูปสวย"],[12,"10:30","คาเฟ่ริมแม่น้ำปิง","The Baristro Ping River","The Baristro Ping River"],[12,"12:00","ซื้อของฝาก","ตลาดวโรรส"]];
 function seedObj(){const o={};SEED.forEach((x,i)=>{o["seed-"+String(i+1).padStart(2,"0")]={day:"2026-10-"+String(x[0]).padStart(2,"0"),time:x[1],title:x[2],note:x[3],editor:"แผนตั้งต้น",at:i+1,url:"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent((x[4]||x[2])+" เชียงใหม่")}});return o}
 
+const REPO="teerasakpradisyon/chiangmai-trip-data",FILE="plans.json",LK="plans_local";
+let TOKEN="";
+const loc={get(){try{return JSON.parse(localStorage.getItem(LK)||"null")}catch(e){return null}},set(o){try{localStorage.setItem(LK,JSON.stringify(o))}catch(e){}}};
+const enc=t=>btoa(unescape(encodeURIComponent(t)));
+const dec=b=>decodeURIComponent(escape(atob(b.replace(/\s/g,""))));
+const ghf=(method,body)=>fetch("https://api.github.com/repos/"+REPO+"/contents/"+FILE,{method,cache:"no-store",headers:{Authorization:"Bearer "+TOKEN,Accept:"application/vnd.github+json","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
+async function readRemote(){
+  const r=await ghf("GET");
+  if(r.status===404)return{data:null,sha:null};
+  if(!r.ok)throw r.status;
+  const j=await r.json();return{data:JSON.parse(dec(j.content)),sha:j.sha};
+}
+async function mutate(fn){
+  for(let i=0;i<4;i++){
+    const{data,sha}=await readRemote();const o=data||{plans:{}};if(!o.plans)o.plans={};
+    fn(o);
+    const body={message:"update plans",content:enc(JSON.stringify(o))};if(sha)body.sha=sha;
+    const r=await ghf("PUT",body);
+    if(r.ok)return;
+    if(r.status!==409&&r.status!==422)throw r.status;
+  }
+  throw 409;
+}
 const api={
-  async all(){const r=await fetch(db+"/plans.json");if(!r.ok)throw 0;return r.json()},
-  async put(id,o){const {id:_,...x}=o;const r=await fetch(db+"/plans/"+id+".json",{method:"PUT",body:JSON.stringify(x)});if(!r.ok)throw 0},
-  async del(id){const r=await fetch(db+"/plans/"+id+".json",{method:"DELETE"});if(!r.ok)throw 0}
+  async all(){if(db==="local")return loc.get();const{data}=await readRemote();return data?data.plans:null},
+  async put(id,o){const {id:_,...x}=o;if(db==="local"){const m=loc.get()||{};m[id]=x;loc.set(m);return}await mutate(m=>{m.plans[id]=x})},
+  async del(id){if(db==="local"){const m=loc.get()||{};delete m[id];loc.set(m);return}await mutate(m=>{delete m.plans[id]})}
 };
 async function pull(){
-  try{const j=await api.all();plans=j?Object.entries(j).map(([id,v])=>({id,...v})):[];renderLists();$("note").style.display="none"}
-  catch(e){$("note").style.display="block"}
+  try{const j=await api.all();plans=j?Object.entries(j).map(([id,v])=>({id,...v})):[];renderLists()}catch(e){}
 }
 async function seedIfNew(){
-  const r=await fetch(db+"/meta/seeded.json");if(!r.ok)throw 0;
-  if(await r.json()===null){
-    await fetch(db+"/plans.json",{method:"PATCH",body:JSON.stringify(seedObj())});
-    await fetch(db+"/meta/seeded.json",{method:"PUT",body:"true"});
-  }
-}
-function normUrl(u){return u.trim().replace(/\.json.*$/,"").replace(/\/+$/,"")}
-function openSetup(){
-  const s=$("sheet");s.textContent="";
-  s.append(el("h3",0,"เชื่อมฐานข้อมูลฟรี (ครั้งเดียว)"));
-  const ol=el("div","meta");
-  ol.innerHTML="";
-  ["1) เข้า console.firebase.google.com → Add project (ฟรี)","2) เมนู Build → Realtime Database → Create database","3) เลือก Start in test mode → Enable","4) คัดลอก URL ที่ขึ้นต้น https:// ที่อยู่บนสุดของหน้า Data มาวางด้านล่าง"].forEach(t=>{ol.append(el("div",0,t))});
-  s.append(ol);
-  s.append(el("label",0,"Database URL"));
-  const i=el("input");i.placeholder="https://xxxx-default-rtdb.firebasedatabase.app";s.append(i);
-  const r=el("div","btns");const g=el("button","b p","เชื่อมต่อ");
-  g.onclick=async()=>{
-    const u=normUrl(i.value);
-    if(!/^https:\/\/[^/]+\.(firebaseio\.com|firebasedatabase\.app)$/.test(u)){toast("URL ไม่ถูกต้อง ต้องลงท้ายด้วย firebaseio.com หรือ firebasedatabase.app");return}
-    try{const x=await fetch(u+"/meta.json");if(!x.ok)throw 0;}catch(e){toast("เชื่อมต่อไม่ได้ ตรวจว่าเลือก test mode แล้ว");return}
-    try{localStorage.setItem("dburl",u)}catch(e){}
-    location.href=location.pathname+"?db="+encodeURIComponent(u);
-  };
-  r.append(g);s.append(r);show();
+  if(db==="local"){if(!localStorage.getItem("seeded_local")){loc.set(seedObj());localStorage.setItem("seeded_local","1")}return}
+  const{data}=await readRemote();
+  if(!data||!data.seeded)await mutate(m=>{if(!m.seeded){m.seeded=true;Object.assign(m.plans,seedObj())}});
 }
 $("share").onclick=async()=>{
-  const l=location.origin+location.pathname+"?db="+encodeURIComponent(db);
+  const l=location.origin+location.pathname+"#t="+TOKEN;
   try{await navigator.clipboard.writeText(l);toast("คัดลอกลิงก์แล้ว ส่งให้เพื่อนได้เลย")}catch(e){prompt("คัดลอกลิงก์นี้ส่งให้เพื่อน",l)}
 };
 renderLists();
 {const t=new Date().toISOString().slice(0,10),i=DAYS.findIndex(x=>x[0]===t);setTimeout(()=>{goTo(i<0?0:i,true);fx()},50)}
 (async()=>{
-  let u=new URLSearchParams(location.search).get("db");
-  if(!u){try{u=localStorage.getItem("dburl")}catch(e){}}
-  if(!u){$("share").style.display="none";openSetup();return}
-  db=normUrl(u);
-  try{localStorage.setItem("dburl",db)}catch(e){}
-  try{await seedIfNew()}catch(e){}
-  await pull();setInterval(()=>{if(!document.hidden)pull()},5000);
+  let t=new URLSearchParams(location.hash.slice(1)).get("t");
+  if(t){try{localStorage.setItem("ghtoken",t)}catch(e){}history.replaceState(null,"",location.pathname+location.search)}
+  else{try{t=localStorage.getItem("ghtoken")}catch(e){}}
+  if(t){TOKEN=t;db="gh"}else{db="local";$("share").style.display="none"}
+  try{await seedIfNew()}catch(e){if(db==="gh")toast("เชื่อม GitHub ไม่ได้ ตรวจโทเคนและชื่อ repo")}
+  await pull();
+  if(db==="gh")setInterval(()=>{if(!document.hidden)pull()},10000);
 })();
 </script>
 </body>
